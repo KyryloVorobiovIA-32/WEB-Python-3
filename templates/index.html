@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Мій Словник</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .admin-panel { background: #fff3cd; padding: 10px; margin-bottom: 20px; border-radius: 5px; }
+        input[type="text"] { padding: 5px; }
+        .update-form { display: inline; }
+    </style>
+</head>
+<body>
+    <h1>📖 Словник Перекладач</h1>
+
+    {% if role == 'admin' %}
+    <div class="admin-panel">
+        <h3>Додати нове слово</h3>
+        <form action="/add?user_role={{ role }}" method="post">
+            <input type="text" name="word_text" placeholder="Слово" required>
+            <input type="text" name="translation" placeholder="Переклад" required>
+            <button type="submit">Додати</button>
+        </form>
+    </div>
+    {% endif %}
+
+    <table>
+        <tr>
+            <th>Слово</th>
+            <th>Переклад</th>
+            {% if role == 'admin' %}<th>Дії</th>{% endif %}
+        </tr>
+        {% for word in words %}
+        <tr>
+            <td>{{ word.word_text }}</td>
+            <td>
+                {% if role == 'admin' %}
+                <form action="/update/{{ word.id }}?user_role={{ role }}" method="post" class="update-form">
+                    <input type="text" name="new_translation" value="{{ word.translation }}">
+                    <button type="submit">Оновити</button>
+                </form>
+                {% else %}
+                {{ word.translation }}
+                {% endif %}
+            </td>
+            {% if role == 'admin' %}
+            <td>
+                <a href="/delete/{{ word.id }}?user_role={{ role }}" style="color: red; text-decoration: none;">Видалити</a>
+            </td>
+            {% endif %}
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
