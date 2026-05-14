@@ -1,88 +1,69 @@
-from fastapi import FastAPI, Depends, Request, Form
+from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
-import models
-import psycopg2
-from database import engine, get_db
+from mongodb import words_collection
+from bson import ObjectId
 
-app = FastAPI(
-    title="Словник-Перекладач API",
-    description="Лабораторна робота №1: API для керування словником слів",
-    version="1.0.0",
-    openapi_tags=[
-        {
-            "name": "Слова",
-            "description": "Операції зі словами у словнику",
-        }
-    ]
-)
-models.Base.metadata.create_all(bind=engine)
-
+app = FastAPI(title="Словник MongoDB API")
 templates = Jinja2Templates(directory="templates")
 
-# Головна сторінка зі списком слів
+
 @app.get("/", response_class=HTMLResponse)
-def read_root(request: Request, db: Session = Depends(get_db), user_role: str = "user"):
-    words = db.query(models.Word).all()
+def read_root(request: Request, user_role: str = "user"):
+    # Отримуємо дані з MongoDB
+    words_cursor = words_collection.find()
+    words = []
+    for word in words_cursor:
+        word['id'] = str(word['_id'])
+        words.append(word)
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
         context={"words": words, "role": user_role}
     )
 
-# Ендпоінт для додавання слова (Create)
+
 @app.post("/add")
-def add_word(word_text: str = Form(...), translation: str = Form(...), db: Session = Depends(get_db), user_role: str = "user"):
-    new_word = models.Word(word_text=word_text, translation=translation)
-    db.add(new_word)
-    db.commit()
+def add_word(word_text: str = Form(...), translation: str = Form(...), user_role: str = "admin"):
+    # Додавання документа в MongoDB
+    new_word = {"word_text": word_text, "translation": translation}
+    words_collection.insert_one(new_word)
+    return RedirectResponse(url=f"/?user_role={user_role}", status_code=303)
+
+
+@app.get("/delete/{word_id}")
+def delete_word(word_id: str, user_role: str = "admin"):
+    # Видалення за ObjectId
+    words_collection.delete_one({"_id": ObjectId(word_id)})
     return RedirectResponse(url=f"/?user_role={user_role}", status_code=303)
 
 @app.post("/update/{word_id}")
-def update_word(word_id: int, new_translation: str = Form(...), db: Session = Depends(get_db), user_role: str = "user"):
-    word = db.query(models.Word).filter(models.Word.id == word_id).first()
-    if word:
-        word.translation = new_translation
-        db.commit()
+def update_word(word_id: str, new_translation: str = Form(...), user_role: str = "admin"):
+    words_collection.update_one(
+        {"_id": ObjectId(word_id)},
+        {"$set": {"translation": new_translation}}
+    )
     return RedirectResponse(url=f"/?user_role={user_role}", status_code=303)
 
-@app.get("/delete/{word_id}")
-def delete_word(word_id: int, db: Session = Depends(get_db), user_role: str = "user"):
-    word = db.query(models.Word).filter(models.Word.id == word_id).first()
-    if word:
-        db.delete(word)
-        db.commit()
-    return RedirectResponse(url=f"/?user_role={user_role}", status_code=303)
 
 @app.get("/stats")
 def get_stats():
-    # Пряме підключення через psycopg2
-    conn = psycopg2.connect(
-        dbname="dictionary_db",
-        user="postgres",
-        password="170806vK",
-        host="localhost"
-    )
-    cursor = conn.cursor()
-    cursor.execute("SELECT count(*) FROM words")
-    count = cursor.fetchone()[0]
-    cursor.close()
-    conn.close()
-    return {"total_words_in_db": count}
+    count = words_collection.count_documents({})
+    return {
+        "total_documents_in_mongodb": count,
+        "database_name": words_collection.database.name,
+        "collection_name": words_collection.name
+    }
 
+@app.get("/search")
+def search_word(q: str):
+    results = list(words_collection.find({"word_text": {"$regex": q, "$options": "i"}}))
 
-@app.get("/init-languages")
-def init_languages():
-    # Використовуємо psycopg2 для масового додавання даних (executemany)
-    conn = psycopg2.connect(dbname="dictionary_db", user="postgres", password="170806vK", host="localhost")
-    cursor = conn.cursor()
+    output = []
+    for res in results:
+        res['id'] = str(res['_id'])
+        del res['_id']
+        output.append(res)
 
-    languages = [('English',), ('Ukrainian',), ('German',)]
-
-    cursor.executemany("INSERT INTO languages (name) VALUES (%s) ON CONFLICT DO NOTHING", languages)
-
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return {"message": "Мови успішно ініціалізовано в PostgreSQL через Psycopg2"}
+    return {"search_query": q, "results": output}
